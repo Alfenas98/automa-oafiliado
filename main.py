@@ -1,6 +1,5 @@
 # main.py — versão otimizada 2026
 
-```python
 """
 🤖 Bot de Afiliados ML — Versão FINAL Playwright 2026
 """
