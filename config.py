@@ -1,43 +1,105 @@
 """
-⚙️ CONFIGURAÇÕES DO BOT — edite aqui sem mexer no main.py
+⚙️ CONFIGURAÇÕES DO BOT
 """
 
 import os
 
-# ─────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 # 🔑 CREDENCIAIS
-# ─────────────────────────────────────────────────────────
-BOT_TOKEN   = os.getenv("BOT_TOKEN",   "8607746726:AAGhBBSN2vJ02r-G5MX1WQNOp3ZBzcM_U18")
-CHANNEL_ID  = os.getenv("CHANNEL_ID",  "@SnakeShoppingOficial")
-AFILIADO_ID = os.getenv("AFILIADO_ID", "snakeshopping")
+# ─────────────────────────────────────────
+BOT_TOKEN   = os.getenv(
+    "BOT_TOKEN",
+    "8607746726:AAGhBBSN2vJ02r-G5MX1W QNOp3ZBzcM_U18"
+)
 
-# ─────────────────────────────────────────────────────────
-# 🔍 BUSCAS - AGORA FOCADO EM QUALQUER PRODUTO ATÉ R$300
-# ─────────────────────────────────────────────────────────
+CHANNEL_ID  = os.getenv(
+    "CHANNEL_ID",
+    "-1003874577875"
+)
+
+AFILIADO_ID = os.getenv(
+    "AFILIADO_ID",
+    "snakeshopping"
+)
+
+# ─────────────────────────────────────────
+# 🔍 BUSCAS
+# ─────────────────────────────────────────
 BUSCAS = [
-    # 🔥 BUSCA GERAL (principal)
-    {"q": "",               "desconto_min": 35, "preco_min": 10,  "preco_max": 300,  "frete_gratis": True},
-    {"q": "promocao",       "desconto_min": 35, "preco_min": 10,  "preco_max": 300,  "frete_gratis": True},
-    {"q": "oferta",         "desconto_min": 35, "preco_min": 10,  "preco_max": 300,  "frete_gratis": True},
-    {"q": "desconto",       "desconto_min": 30, "preco_min": 10,  "preco_max": 300,  "frete_gratis": True},
-    
-    # Algumas categorias específicas (opcional - você pode remover depois)
-    {"q": "air fryer",      "desconto_min": 25, "preco_min": 100, "preco_max": 800,  "frete_gratis": True},
-    {"q": "fone de ouvido", "desconto_min": 30, "preco_min": 30,  "preco_max": 300,  "frete_gratis": True},
+
+    # GERAIS
+    {
+        "q": "",
+        "desconto_min": 40,
+        "preco_min": 15,
+        "preco_max": 300,
+        "frete_gratis": True
+    },
+
+    {
+        "q": "oferta",
+        "desconto_min": 35,
+        "preco_min": 15,
+        "preco_max": 300,
+        "frete_gratis": True
+    },
+
+    {
+        "q": "promocao",
+        "desconto_min": 35,
+        "preco_min": 15,
+        "preco_max": 300,
+        "frete_gratis": True
+    },
+
+    # CATEGORIAS QUE MAIS CONVERTEM
+    {
+        "q": "fone bluetooth",
+        "desconto_min": 30,
+        "preco_min": 25,
+        "preco_max": 250,
+        "frete_gratis": True
+    },
+
+    {
+        "q": "smartwatch",
+        "desconto_min": 30,
+        "preco_min": 40,
+        "preco_max": 300,
+        "frete_gratis": True
+    },
+
+    {
+        "q": "air fryer",
+        "desconto_min": 25,
+        "preco_min": 120,
+        "preco_max": 900,
+        "frete_gratis": True
+    },
+
+    {
+        "q": "caixa de som bluetooth",
+        "desconto_min": 30,
+        "preco_min": 40,
+        "preco_max": 300,
+        "frete_gratis": True
+    },
 ]
 
-# ─────────────────────────────────────────────────────────
-# FILTROS GLOBAIS
-# ─────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
+# 🎯 FILTROS
+# ─────────────────────────────────────────
 FILTROS_GLOBAIS = {
-    "avaliacao_min": 4.0,
-    "vendidos_min": 8,
-    "score_minimo": 55,
+    "avaliacao_min": 4.2,
+    "vendidos_min": 20,
+    "score_minimo": 58,
     "apenas_novo": True,
     "loja_oficial": False,
 }
 
-# PESOS DO SCORE
+# ─────────────────────────────────────────
+# 📊 SCORE
+# ─────────────────────────────────────────
 PESOS_SCORE = {
     "desconto": 35,
     "avaliacao": 25,
@@ -46,24 +108,61 @@ PESOS_SCORE = {
     "loja_oficial": 5,
 }
 
-# BLACKLIST
+# ─────────────────────────────────────────
+# 🚫 BLACKLIST
+# ─────────────────────────────────────────
 BLACKLIST_TITULO = [
-    "genérico", "réplica", "similar", "inspired", "paralelo", 
-    "sem marca", "kit 10", "kit 20", "usado", "recondicionado"
+
+    "réplica",
+    "replica",
+    "similar",
+    "genérico",
+    "generico",
+    "paralelo",
+    "sem marca",
+    "usado",
+    "recondicionado",
+    "display",
+    "mostruario",
 ]
 
 BLACKLIST_VENDEDOR = []
 
-# POSTAGEM
-PRODUTOS_POR_BUSCA    = 3
-PAUSA_ENTRE_POSTS_SEG = 4
-POSTAR_RESUMO_DIARIO  = True
+# ─────────────────────────────────────────
+# 📤 POSTAGEM
+# ─────────────────────────────────────────
+PRODUTOS_POR_BUSCA = 2
 
-# HORÁRIO (agora prioriza busca geral)
+# MUITO IMPORTANTE
+PAUSA_ENTRE_POSTS_SEG = 25
+
+POSTAR_RESUMO_DIARIO = True
+
+# ─────────────────────────────────────────
+# 🕒 HORÁRIOS
+# ─────────────────────────────────────────
 HORARIO_CATEGORIAS = {
-    "manha":  ["", "promocao", "oferta"],
-    "almoco": ["", "promocao", "oferta"],
-    "tarde":  ["", "promocao", "oferta"],
-    "noite":  ["", "promocao", "oferta"],
-    "todas":  None,
+
+    "manha": [
+        "",
+        "oferta",
+        "smartwatch"
+    ],
+
+    "almoco": [
+        "",
+        "fone bluetooth"
+    ],
+
+    "tarde": [
+        "",
+        "caixa de som bluetooth"
+    ],
+
+    "noite": [
+        "",
+        "air fryer"
+    ],
+
+    "todas": None,
 }
