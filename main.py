@@ -1,5 +1,5 @@
 """
-🤖 Bot de Afiliados ML — Versão Final Playwright 2026
+🤖 Bot de Afiliados ML — Versão FINAL Playwright 2026
 """
 
 import os
@@ -52,7 +52,7 @@ def calcular_score(produto: dict) -> float:
     s_loja = p["loja_oficial"] if produto.get("loja_oficial") else 0
     return round(s_desconto + s_avaliacao + s_vendidos + s_frete + s_loja, 1)
 
-# ====================== PLAYWRIGHT SCRAPING ======================
+# ====================== PLAYWRIGHT - VERSÃO FINAL ======================
 def buscar_ml(busca: dict, limite: int = 12) -> list:
     query = busca["q"].replace(" ", "-").lower() if busca.get("q") else "oferta"
     url = f"https://lista.mercadolivre.com.br/{query}"
@@ -69,43 +69,55 @@ def buscar_ml(busca: dict, limite: int = 12) -> list:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
                 viewport={"width": 1920, "height": 1080}
             )
             page = context.new_page()
             
             page.goto(url, wait_until="networkidle", timeout=90000)
-            page.wait_for_timeout(8000)
+            page.wait_for_timeout(10000)
 
-            # Scroll para carregar mais
-            for _ in range(3):
+            # Scroll agressivo
+            for _ in range(4):
                 page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                page.wait_for_timeout(2500)
+                page.wait_for_timeout(3000)
 
             soup = BeautifulSoup(page.content(), "lxml")
-            cards = soup.select("div.andes-card, article.andes-card, li.ui-search-layout__item, div.poly-card")
 
-            print(f"   🔎 {len(cards)} cards encontrados")
+            # Seletores mais atualizados (2026)
+            cards = soup.select("""
+                div.andes-card, 
+                article.andes-card, 
+                li.ui-search-layout__item, 
+                div.poly-card,
+                div.ui-search-result__wrapper,
+                div[data-testid*="search-result"]
+            """)
+
+            print(f"   🔎 {len(cards)} cards detectados na página")
 
             for card in cards[:limite]:
                 try:
-                    titulo_tag = card.select_one("h2.ui-search-item__title, h3.poly-component__title, a.poly-component__title-link")
+                    # Título
+                    titulo_tag = card.select_one("h2, h3, a.poly-component__title-link, .poly-component__title, .ui-search-item__title")
                     titulo = titulo_tag.get_text(strip=True) if titulo_tag else ""
-                    if len(titulo) < 15: continue
+                    if len(titulo) < 15:
+                        continue
 
-                    preco_atual_tag = card.select_one("span.andes-money-amount__fraction")
-                    preco_original_tag = card.select_one("s span.andes-money-amount__fraction, .andes-money-amount--previous .andes-money-amount__fraction")
+                    # Preços
+                    preco_atual_tag = card.select_one("span.andes-money-amount__fraction, .poly-price__fraction")
+                    preco_original_tag = card.select_one("s .andes-money-amount__fraction, .andes-money-amount--previous .andes-money-amount__fraction, span.andes-money-amount__fraction--strike")
 
                     def limpar(tag):
                         if not tag: return 0
-                        t = tag.get_text(strip=True).replace(".", "").replace(",", ".")
-                        try: return float(t)
+                        text = tag.get_text(strip=True).replace(".", "").replace(",", ".")
+                        try: return float(text)
                         except: return 0
 
                     p_atual = limpar(preco_atual_tag)
                     p_original = limpar(preco_original_tag) or p_atual
 
-                    if p_original <= p_atual * 1.08 or p_atual < 10:
+                    if p_original <= p_atual * 1.08 or p_atual < 15:
                         continue
 
                     desconto = int(((p_original - p_atual) / p_original) * 100)
@@ -135,19 +147,19 @@ def buscar_ml(busca: dict, limite: int = 12) -> list:
                         "categoria": "Geral",
                     }
                     produtos.append(produto)
-                    print(f"     ✅ {titulo[:60]}... ({desconto}%)")
+                    print(f"     ✅ Encontrado: {titulo[:70]}... ({desconto}% OFF)")
 
                 except:
                     continue
 
             browser.close()
     except Exception as e:
-        print(f" ❌ Erro: {e}")
+        print(f" ❌ Erro scraping: {e}")
 
     print(f" 📦 {len(produtos)} produtos encontrados")
     return produtos
 
-# ====================== FUNÇÕES ORIGINAIS ======================
+# ====================== RESTO DO CÓDIGO ======================
 def aplicar_filtros_inteligentes(produtos: list) -> list:
     f = cfg.FILTROS_GLOBAIS
     filtrados = []
@@ -161,7 +173,6 @@ def aplicar_filtros_inteligentes(produtos: list) -> list:
             continue
         if p["vendidos"] < f.get("vendidos_min", 0):
             continue
-
         p["score"] = calcular_score(p)
         if p["score"] < f.get("score_minimo", 0):
             continue
@@ -196,19 +207,15 @@ def formatar_mensagem(p: dict) -> str:
     economia = formatar_preco(p["preco_original"] - p["preco_atual"])
     link = p.get("link_afiliado", p["url"])
     header = random.choice(TEMPLATES)
-
     linhas = [f"{header}\n", f"📦 *{titulo}*\n", f"~~{original}~~ → *{atual}*", f"💸 *{p['desconto']}% OFF* — economiza *{economia}*\n"]
-
     if p.get("avaliacao", 0) > 0:
         linhas.append(f"⭐ {estrelas(p['avaliacao'])}")
     if p.get("vendidos", 0) > 0:
         linhas.append(f"🛒 {p['vendidos']:,} vendidos".replace(",", "."))
-
     extras = []
     if p.get("frete_gratis"): extras.append("✅ Frete Grátis")
     if p.get("loja_oficial"): extras.append("🏪 Loja Oficial")
-    if extras: linhas.append("   ".join(extras))
-
+    if extras: linhas.append(" ".join(extras))
     linhas.append(f"\n👉 [*Pegar oferta agora*]({link})")
     linhas.append(f"\n_⏰ {datetime.now().strftime('%d/%m %H:%M')} · Pode acabar logo_")
     return "\n".join(linhas)
@@ -235,7 +242,6 @@ def buscas_do_horario() -> list:
     elif 14 <= hora < 18: periodo = "tarde"
     elif 18 <= hora < 21: periodo = "noite"
     else: periodo = "todas"
-    
     cats = cfg.HORARIO_CATEGORIAS.get(periodo)
     return cfg.BUSCAS if cats is None else [b for b in cfg.BUSCAS if b["q"] in cats]
 
@@ -248,7 +254,7 @@ def main():
 
     historico = carregar_json(ARQUIVO_HISTORICO, [])
     estatisticas = carregar_json(ARQUIVO_ESTATICAS, {
-        "postados": 0, "analisados": 0, "filtrados": 0, 
+        "postados": 0, "analisados": 0, "filtrados": 0,
         "maior_desconto": 0, "data": agora.strftime("%d/%m/%Y")
     })
 
@@ -259,10 +265,9 @@ def main():
     total_posts = 0
 
     for busca in buscas:
-        print(f" 🔍 [{busca['q'].upper()}]")
+        print(f" 🔍 [{busca.get('q', 'GERAL').upper()}]")
         brutos = buscar_ml(busca)
         estatisticas["analisados"] += len(brutos)
-
         filtrados = aplicar_filtros_inteligentes(brutos)
         estatisticas["filtrados"] += len(brutos) - len(filtrados)
 
@@ -282,7 +287,6 @@ def main():
 
     salvar_json(ARQUIVO_HISTORICO, historico)
     salvar_json(ARQUIVO_ESTATICAS, estatisticas)
-
     print(f"\n✅ Finalizado • {total_posts} post(s) enviados")
 
 if __name__ == "__main__":
