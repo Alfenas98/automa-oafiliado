@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 import config as cfg
+import requests
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 
@@ -56,7 +57,7 @@ def calcular_score(produto: dict) -> float:
     total = s_desconto + s_avaliacao + s_vendidos + s_frete + s_loja
     return round(total, 1)
 
-# ====================== WEB SCRAPING ======================
+# ====================== SCRAPING ======================
 def buscar_ml(busca: dict, limite: int = 20) -> list:
     query = busca["q"].replace(" ", "-").lower()
     url = f"https://lista.mercadolivre.com.br/{query}"
@@ -76,25 +77,21 @@ def buscar_ml(busca: dict, limite: int = 20) -> list:
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
             )
             page = context.new_page()
-            
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(5000)  # Aguarda JS carregar produtos
+            page.wait_for_timeout(5000)
 
             soup = BeautifulSoup(page.content(), "lxml")
             cards = soup.select("div.andes-card, article.andes-card, div.ui-search-result__wrapper")
 
             for card in cards[:limite]:
                 try:
-                    # Título
                     titulo_tag = card.select_one("h2.ui-search-item__title, h3.poly-component__title")
                     titulo = titulo_tag.get_text(strip=True) if titulo_tag else ""
+                    if not titulo:
+                        continue
 
-                    # Preços
                     preco_atual_tag = card.select_one("span.andes-money-amount__fraction")
                     preco_original_tag = card.select_one("span.andes-money-amount--previous .andes-money-amount__fraction, s .andes-money-amount__fraction")
-
-                    if not preco_atual_tag or not titulo:
-                        continue
 
                     def limpar_preco(tag):
                         if not tag: return 0
@@ -105,24 +102,20 @@ def buscar_ml(busca: dict, limite: int = 20) -> list:
                     preco_atual = limpar_preco(preco_atual_tag)
                     preco_original = limpar_preco(preco_original_tag) or preco_atual
 
-                    if preco_original <= preco_atual * 1.08:  # mínimo 8% de desconto
+                    if preco_original <= preco_atual * 1.08:
                         continue
 
                     desconto = int(((preco_original - preco_atual) / preco_original) * 100)
                     if desconto < busca.get("desconto_min", 15):
                         continue
 
-                    # Link
-                    link_tag = card.select_one("a.ui-search-link, a.poly-component__title-link")
+                    link_tag = card.select_one("a.ui-search-link")
                     link = "https://www.mercadolivre.com.br" + link_tag.get("href", "") if link_tag else ""
 
-                    # Imagem
                     img = card.select_one("img")
                     thumbnail = img.get("src") or img.get("data-src", "") if img else ""
 
-                    # Avaliação e vendidos (aproximado)
                     avaliacao = 4.3
-                    vendidos = 150
                     avaliacao_tag = card.select_one("span.andes-rating__average")
                     if avaliacao_tag:
                         try:
@@ -138,7 +131,7 @@ def buscar_ml(busca: dict, limite: int = 20) -> list:
                         "desconto": desconto,
                         "avaliacao": avaliacao,
                         "qtd_avaliacoes": 80,
-                        "vendidos": vendidos,
+                        "vendidos": 150,
                         "frete_gratis": busca.get("frete_gratis", False),
                         "loja_oficial": False,
                         "thumbnail": thumbnail.replace("http://", "https://"),
@@ -147,19 +140,17 @@ def buscar_ml(busca: dict, limite: int = 20) -> list:
                         "categoria": busca["q"],
                     }
                     produtos.append(produto)
-
-                except Exception:
+                except:
                     continue
 
             browser.close()
-
     except Exception as e:
-        print(f" ❌ Erro no scraping: {e}")
+        print(f" ❌ Erro scraping: {e}")
 
-    print(f" 📦 {len(produtos)} produtos encontrados via scraping")
+    print(f" 📦 {len(produtos)} produtos encontrados")
     return produtos
 
-# ====================== FUNÇÕES ORIGINAIS (mantidas) ======================
+# ====================== FUNÇÕES ORIGINAIS ======================
 def aplicar_filtros_inteligentes(produtos: list) -> list:
     f = cfg.FILTROS_GLOBAIS
     filtrados = []
@@ -180,12 +171,10 @@ def aplicar_filtros_inteligentes(produtos: list) -> list:
         filtrados.append(p)
     return sorted(filtrados, key=lambda x: x["score"], reverse=True)
 
-
 def gerar_link_afiliado(url: str) -> str:
     if cfg.AFILIADO_ID:
         return f"https://mercadolivre.com/sec/{cfg.AFILIADO_ID}?url={url}"
     return url
-
 
 TEMPLATES = [
     "🔥 *OFERTA IMPERDÍVEL* 🔥", "⚡ *PROMOÇÃO RELÂMPAGO* ⚡",
@@ -208,33 +197,24 @@ def formatar_mensagem(p: dict) -> str:
     original = formatar_preco(p["preco_original"])
     atual = formatar_preco(p["preco_atual"])
     economia = formatar_preco(p["preco_original"] - p["preco_atual"])
-    link = p["link_afiliado"]
+    link = p.get("link_afiliado", p["url"])
     header = random.choice(TEMPLATES)
 
-    linhas = [
-        f"{header}\n",
-        f"📦 *{titulo}*\n",
-        f"~~{original}~~ → *{atual}*",
-        f"💸 *{p['desconto']}% OFF* — você economiza *{economia}*\n",
-    ]
+    linhas = [f"{header}\n", f"📦 *{titulo}*\n", f"~~{original}~~ → *{atual}*", f"💸 *{p['desconto']}% OFF* — economiza *{economia}*\n"]
+
     if p.get("avaliacao", 0) > 0:
-        linhas.append(f"⭐ {estrelas(p['avaliacao'])} ({p.get('qtd_avaliacoes', 0)} avaliações)")
+        linhas.append(f"⭐ {estrelas(p['avaliacao'])}")
     if p.get("vendidos", 0) > 0:
         linhas.append(f"🛒 {p['vendidos']:,} vendidos".replace(",", "."))
 
     extras = []
     if p.get("frete_gratis"): extras.append("✅ Frete Grátis")
     if p.get("loja_oficial"): extras.append("🏪 Loja Oficial")
-    if extras:
-        linhas.append("   ".join(extras))
+    if extras: linhas.append("   ".join(extras))
 
     linhas.append(f"\n👉 [*Pegar oferta agora*]({link})")
-    linhas.append(f"\n_⏰ {datetime.now().strftime('%d/%m às %H:%M')} · Pode acabar a qualquer momento_")
+    linhas.append(f"\n_⏰ {datetime.now().strftime('%d/%m %H:%M')} · Pode acabar logo_")
     return "\n".join(linhas)
-
-def formatar_resumo_diario(stats: dict) -> str:
-    hoje = datetime.now().strftime("%d/%m/%Y")
-    return f"📊 *Resumo do dia — {hoje}*\n\n📦 Postados: *{stats['postados']}*\n🔍 Analisados: *{stats['analisados']}*\n🚫 Filtrados: *{stats['filtrados']}*\n💸 Maior desconto: *{stats['maior_desconto']}%*"
 
 def enviar_telegram(texto: str, foto: str = "") -> bool:
     if not cfg.BOT_TOKEN or not cfg.CHANNEL_ID:
@@ -246,7 +226,6 @@ def enviar_telegram(texto: str, foto: str = "") -> bool:
         else:
             url = f"https://api.telegram.org/bot{cfg.BOT_TOKEN}/sendMessage"
             payload = {"chat_id": cfg.CHANNEL_ID, "text": texto, "parse_mode": "Markdown"}
-        
         r = requests.post(url, json=payload, timeout=15)
         return r.status_code == 200
     except:
@@ -259,7 +238,7 @@ def buscas_do_horario() -> list:
     elif 14 <= hora < 18: periodo = "tarde"
     elif 18 <= hora < 21: periodo = "noite"
     else: periodo = "todas"
-
+    
     cats = cfg.HORARIO_CATEGORIAS.get(periodo)
     return cfg.BUSCAS if cats is None else [b for b in cfg.BUSCAS if b["q"] in cats]
 
@@ -271,48 +250,43 @@ def main():
     print(f"{'═'*60}\n")
 
     historico = carregar_json(ARQUIVO_HISTORICO, [])
-    estatisticas = carregar_json(ARQUIVO_ESTATICAS, {"postados":0,"analisados":0,"filtrados":0,"maior_desconto":0,"data":agora.strftime("%d/%m/%Y")})
+    estatisticas = carregar_json(ARQUIVO_ESTATICAS, {
+        "postados": 0, "analisados": 0, "filtrados": 0, 
+        "maior_desconto": 0, "data": agora.strftime("%d/%m/%Y")
+    })
 
     if estatisticas.get("data") != agora.strftime("%d/%m/%Y"):
-        estatisticas = {"postados":0,"analisados":0,"filtrados":0,"maior_desconto":0,"data":agora.strftime("%d/%m/%Y")}
+        estatisticas = {"postados":0, "analisados":0, "filtrados":0, "maior_desconto":0, "data": agora.strftime("%d/%m/%Y")}
 
     buscas = buscas_do_horario()
     total_posts = 0
 
-    print(f" 📋 Categorias: {len(buscas)}\n")
-
     for busca in buscas:
         print(f" 🔍 [{busca['q'].upper()}]")
-        brutos = buscar_ml(busca, limite=20)
+        brutos = buscar_ml(busca)
         estatisticas["analisados"] += len(brutos)
 
         filtrados = aplicar_filtros_inteligentes(brutos)
-        estatisticas["filtrados"] += (len(brutos) - len(filtrados))
-
-        print(f"     → {len(filtrados)} aprovados")
+        estatisticas["filtrados"] += len(brutos) - len(filtrados)
 
         for produto in filtrados[:cfg.PRODUTOS_POR_BUSCA]:
             if ja_postado(produto["id"], historico):
                 continue
             produto["link_afiliado"] = gerar_link_afiliado(produto["url"])
             msg = formatar_mensagem(produto)
-            ok = enviar_telegram(msg, produto["thumbnail"])
-            if ok:
+            if enviar_telegram(msg, produto["thumbnail"]):
                 registrar(produto["id"], historico)
                 total_posts += 1
                 estatisticas["postados"] += 1
                 if produto["desconto"] > estatisticas["maior_desconto"]:
                     estatisticas["maior_desconto"] = produto["desconto"]
-                print(f"     ✅ Postado: {produto['desconto']}% off")
+                print(f"     ✅ Postado ({produto['desconto']}%)")
                 time.sleep(cfg.PAUSA_ENTRE_POSTS_SEG)
-
-    if cfg.POSTAR_RESUMO_DIARIO and 21 <= agora.hour < 22:
-        enviar_telegram(formatar_resumo_diario(estatisticas))
 
     salvar_json(ARQUIVO_HISTORICO, historico)
     salvar_json(ARQUIVO_ESTATICAS, estatisticas)
 
-    print(f"\n✅ Rodada finalizada • {total_posts} post(s)")
+    print(f"\n✅ Finalizado • {total_posts} post(s) enviados")
 
 if __name__ == "__main__":
     main()
