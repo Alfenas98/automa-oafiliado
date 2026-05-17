@@ -12,43 +12,32 @@ CHANNEL_ID  = os.getenv("CHANNEL_ID",  "@SnakeShoppingOficial")
 AFILIADO_ID = os.getenv("AFILIADO_ID", "snakeshopping")
 
 # ─────────────────────────────────────────────────────────
-# 🔍 CATEGORIAS E BUSCAS
+# 🔍 BUSCAS - AGORA FOCADO EM QUALQUER PRODUTO ATÉ R$300
 # ─────────────────────────────────────────────────────────
 BUSCAS = [
-    # 🔥 BUSCA GERAL - QUALQUER PRODUTO EM OFERTA ATÉ R$300 (PRIORIDADE ALTA)
-    {"q": "",               "desconto_min": 35, "preco_min": 15,  "preco_max": 300,  "frete_gratis": True},
+    # 🔥 BUSCA GERAL (principal)
+    {"q": "",               "desconto_min": 35, "preco_min": 10,  "preco_max": 300,  "frete_gratis": True},
     {"q": "promocao",       "desconto_min": 35, "preco_min": 10,  "preco_max": 300,  "frete_gratis": True},
     {"q": "oferta",         "desconto_min": 35, "preco_min": 10,  "preco_max": 300,  "frete_gratis": True},
-    {"q": "desconto",       "desconto_min": 30, "preco_min": 15,  "preco_max": 300,  "frete_gratis": True},
-
-    # 💻 Tecnologia (mantidas, mas só as mais relevantes)
-    {"q": "notebook gamer", "desconto_min": 15, "preco_min": 1500, "preco_max": 8000, "frete_gratis": True},
-    {"q": "monitor gamer",  "desconto_min": 20, "preco_min": 600,  "preco_max": 4000, "frete_gratis": True},
-    {"q": "ssd nvme",       "desconto_min": 25, "preco_min": 80,   "preco_max": 800,  "frete_gratis": False},
-    {"q": "fone de ouvido bluetooth", "desconto_min": 25, "preco_min": 50, "preco_max": 600, "frete_gratis": True},
-
-    # 🏠 Casa e Cozinha
-    {"q": "air fryer",      "desconto_min": 25, "preco_min": 100, "preco_max": 1000, "frete_gratis": True},
-    {"q": "aspirador robô", "desconto_min": 20, "preco_min": 200, "preco_max": 2000, "frete_gratis": True},
-
-    # Outras categorias (pode descomentar se quiser)
-    # {"q": "smartphone samsung", "desconto_min": 20, "preco_min": 800, "preco_max": 5000, "frete_gratis": True},
+    {"q": "desconto",       "desconto_min": 30, "preco_min": 10,  "preco_max": 300,  "frete_gratis": True},
+    
+    # Algumas categorias específicas (opcional - você pode remover depois)
+    {"q": "air fryer",      "desconto_min": 25, "preco_min": 100, "preco_max": 800,  "frete_gratis": True},
+    {"q": "fone de ouvido", "desconto_min": 30, "preco_min": 30,  "preco_max": 300,  "frete_gratis": True},
 ]
 
 # ─────────────────────────────────────────────────────────
-# 🧠 FILTROS GLOBAIS DE QUALIDADE
+# FILTROS GLOBAIS
 # ─────────────────────────────────────────────────────────
 FILTROS_GLOBAIS = {
     "avaliacao_min": 4.0,
-    "vendidos_min": 10,
-    "score_minimo": 58,      # Aumentei um pouco por causa da busca geral
+    "vendidos_min": 8,
+    "score_minimo": 55,
     "apenas_novo": True,
     "loja_oficial": False,
 }
 
-# ─────────────────────────────────────────────────────────
-# ⚖️ PESOS DO SCORE
-# ─────────────────────────────────────────────────────────
+# PESOS DO SCORE
 PESOS_SCORE = {
     "desconto": 35,
     "avaliacao": 25,
@@ -57,30 +46,24 @@ PESOS_SCORE = {
     "loja_oficial": 5,
 }
 
-# ─────────────────────────────────────────────────────────
-# 🚫 BLACKLIST
-# ─────────────────────────────────────────────────────────
+# BLACKLIST
 BLACKLIST_TITULO = [
-    "genérico", "réplica", "similar", "inspired",
-    "paralelo", "sem marca", "kit 10", "kit 20", "usado"
+    "genérico", "réplica", "similar", "inspired", "paralelo", 
+    "sem marca", "kit 10", "kit 20", "usado", "recondicionado"
 ]
 
 BLACKLIST_VENDEDOR = []
 
-# ─────────────────────────────────────────────────────────
-# 📬 POSTAGEM
-# ─────────────────────────────────────────────────────────
-PRODUTOS_POR_BUSCA    = 3     # Aumentei um pouco para a busca geral
+# POSTAGEM
+PRODUTOS_POR_BUSCA    = 3
 PAUSA_ENTRE_POSTS_SEG = 4
 POSTAR_RESUMO_DIARIO  = True
 
-# ─────────────────────────────────────────────────────────
-# ⏰ CATEGORIAS POR HORÁRIO (atualizado)
-# ─────────────────────────────────────────────────────────
+# HORÁRIO (agora prioriza busca geral)
 HORARIO_CATEGORIAS = {
-    "manha":  ["air fryer", "aspirador robô"], 
-    "almoco": ["promocao", "oferta"],           # Busca geral
-    "tarde":  ["notebook gamer", "monitor gamer", "ssd nvme"],
-    "noite":  ["", "promocao", "oferta"],       # Busca geral
+    "manha":  ["", "promocao", "oferta"],
+    "almoco": ["", "promocao", "oferta"],
+    "tarde":  ["", "promocao", "oferta"],
+    "noite":  ["", "promocao", "oferta"],
     "todas":  None,
 }
