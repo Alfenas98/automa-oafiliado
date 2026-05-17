@@ -2,11 +2,11 @@ name: 🤖 Bot Afiliados ML — Inteligente
 
 on:
   schedule:
-    - cron: "0 11 * * *"    # 08h Brasília
-    - cron: "0 15 * * *"    # 12h Brasília
-    - cron: "0 19 * * *"    # 16h Brasília
-    - cron: "0 22 * * *"    # 19h Brasília
-    - cron: "0 00 * * *"    # 21h Brasília (resumo)
+    - cron: "0 11 * * *"
+    - cron: "0 15 * * *"
+    - cron: "0 19 * * *"
+    - cron: "0 22 * * *"
+    - cron: "0 0 * * *"
 
   workflow_dispatch:
     inputs:
@@ -24,8 +24,6 @@ jobs:
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: 🐍 Setup Python 3.11
         uses: actions/setup-python@v5
@@ -33,9 +31,7 @@ jobs:
           python-version: "3.11"
 
       - name: 📦 Instalar dependências
-        run: |
-          pip install -r requirements.txt
-          playwright install chromium --with-deps
+        run: pip install -r requirements.txt
 
       - name: 🚀 Rodar bot
         env:
@@ -48,12 +44,8 @@ jobs:
         run: |
           git config user.name "bot-afiliados[bot]"
           git config user.email "bot@users.noreply.github.com"
-          
           git add historico.json estatisticas.json 2>/dev/null || true
-          
-          if git diff --staged --quiet; then
-            echo "Nenhuma alteração para commitar"
-          else
+          if ! git diff --staged --quiet; then
             git commit -m "chore: atualiza dados [skip ci]"
             git push
           fi
