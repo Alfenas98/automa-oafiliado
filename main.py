@@ -69,26 +69,27 @@ HEADERS = {
     "Accept":     "application/json",
 }
 
-def buscar_ml(busca, limite=20):
+def buscar_ml(busca, limite=50):
     query = (busca.get("q") or "oferta").strip()
     if not query:
         query = "oferta"
 
     url    = "https://api.mercadolibre.com/sites/MLB/search"
+
+    # ⚠️ Só parâmetros públicos — shipping_cost e condition causam 403
     params = {
-        "q":         query,
-        "sort":      "relevance",
-        "limit":     limite,
-        "condition": "new" if cfg.FILTROS_GLOBAIS.get("apenas_novo") else "all",
+        "q":     query,
+        "sort":  "relevance",
+        "limit": limite,
     }
 
-    if busca.get("frete_gratis"):
-        params["shipping_cost"] = "free"
-
+    # Filtro de preço é aceito sem autenticação
     if busca.get("preco_min"):
         params["price_min"] = busca["preco_min"]
     if busca.get("preco_max"):
         params["price_max"] = busca["preco_max"]
+
+    # frete_gratis e condition=new → filtrados manualmente nos resultados
 
     try:
         r = requests.get(url, params=params, headers=HEADERS, timeout=15)
@@ -115,6 +116,15 @@ def buscar_ml(busca, limite=20):
         frete_info   = p.get("shipping") or {}
         frete_gratis = frete_info.get("free_shipping", False)
         loja_oficial = bool(p.get("official_store_id"))
+        condicao     = p.get("condition", "new")
+
+        # Filtro manual: apenas_novo
+        if cfg.FILTROS_GLOBAIS.get("apenas_novo") and condicao != "new":
+            continue
+
+        # Filtro manual: frete grátis (quando exigido pela busca)
+        if busca.get("frete_gratis") and not frete_gratis:
+            continue
 
         # Pega thumbnail em alta qualidade
         thumb = (p.get("thumbnail") or "").replace("http://", "https://")
