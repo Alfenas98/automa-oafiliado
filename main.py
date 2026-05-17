@@ -534,17 +534,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# Alterações aplicadas
-
-* Removido BeautifulSoup
-* Scraping 100% via Playwright
-* Anti-bot melhorado
-* Captcha detector
-* Seletores atualizados 2026
-* Correção do link Mercado Livre
-* Lazy loading das imagens corrigido
-* Scroll mais eficiente
-* Filtro de desconto menos agressivo
-* Logs melhores para debug
-* Navegador mais estável no GitHub Actions
