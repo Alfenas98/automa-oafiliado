@@ -1,4 +1,4 @@
-name: 🤖 Bot Afiliados ML — Inteligente
+name: 🤖 Bot Afiliados ML
 
 on:
   schedule:
@@ -7,13 +7,12 @@ on:
     - cron: "0 19 * * *"
     - cron: "0 22 * * *"
     - cron: "0 0 * * *"
-
   workflow_dispatch:
     inputs:
       forcar_todas:
-        description: "Rodar todas as categorias (ignora horário)"
+        description: "Rodar todas as categorias"
         required: false
-        default: "false"
+        default: "true"
 
 jobs:
   postar-ofertas:
@@ -22,27 +21,28 @@ jobs:
       contents: write
 
     steps:
-      - name: 📥 Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: 🐍 Setup Python 3.11
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: 📦 Instalar dependências
-        run: pip install -r requirements.txt
+      - name: Instalar Playwright e dependências
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium --with-deps
 
-      - name: 🚀 Rodar bot
+      - name: Rodar Bot
         env:
-          BOT_TOKEN:   ${{ secrets.BOT_TOKEN }}
-          CHANNEL_ID:  ${{ secrets.CHANNEL_ID }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
           AFILIADO_ID: ${{ secrets.AFILIADO_ID }}
         run: python main.py
 
-      - name: 💾 Salvar histórico e estatísticas
+      - name: Salvar dados
         run: |
-          git config user.name "bot-afiliados[bot]"
+          git config user.name "bot-afiliados"
           git config user.email "bot@users.noreply.github.com"
           git add historico.json estatisticas.json 2>/dev/null || true
           if ! git diff --staged --quiet; then
