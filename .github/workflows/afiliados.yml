@@ -2,17 +2,18 @@ name: 🤖 Bot Afiliados ML
 
 on:
   schedule:
-    - cron: "0 11 * * *"
-    - cron: "0 15 * * *"
-    - cron: "0 19 * * *"
-    - cron: "0 22 * * *"
-    - cron: "0 0 * * *"
+    - cron: "0 11 * * *"   # 08h Brasília
+    - cron: "0 15 * * *"   # 12h Brasília
+    - cron: "0 19 * * *"   # 16h Brasília
+    - cron: "0 22 * * *"   # 19h Brasília
+    - cron: "0 00 * * *"   # 21h Brasília (resumo diário)
+
   workflow_dispatch:
     inputs:
       forcar_todas:
-        description: "Rodar todas as categorias"
+        description: "Rodar todas as categorias (ignora horário)"
         required: false
-        default: "true"
+        default: "false"
 
 jobs:
   postar-ofertas:
@@ -21,28 +22,27 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: 🐍 Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Instalar Playwright e dependências
-        run: |
-          pip install -r requirements.txt
-          playwright install chromium --with-deps
+      - name: 📦 Instalar dependências
+        run: pip install -r requirements.txt
 
-      - name: Rodar Bot
+      - name: 🚀 Rodar Bot
         env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
+          BOT_TOKEN:   ${{ secrets.BOT_TOKEN }}
+          CHANNEL_ID:  ${{ secrets.CHANNEL_ID }}
           AFILIADO_ID: ${{ secrets.AFILIADO_ID }}
         run: python main.py
 
-      - name: Salvar dados
+      - name: 💾 Salvar dados
         run: |
-          git config user.name "bot-afiliados"
+          git config user.name  "bot-afiliados"
           git config user.email "bot@users.noreply.github.com"
           git add historico.json estatisticas.json 2>/dev/null || true
           if ! git diff --staged --quiet; then
