@@ -57,9 +57,10 @@ def calcular_score(produto: dict) -> float:
     total = s_desconto + s_avaliacao + s_vendidos + s_frete + s_loja
     return round(total, 1)
 
-# ====================== SCRAPING REFORÇADO ======================
-def buscar_ml(busca: dict, limite: int = 12) -> list:
-    query = busca["q"].replace(" ", "-").lower() if busca.get("q") else ""
+import cloudscraper
+
+def buscar_ml(busca: dict, limite: int = 15) -> list:
+    query = busca["q"].replace(" ", "-").lower() if busca.get("q") else "oferta"
     url = f"https://lista.mercadolivre.com.br/{query}"
 
     if busca.get("preco_min") or busca.get("preco_max"):
@@ -67,104 +68,77 @@ def buscar_ml(busca: dict, limite: int = 12) -> list:
     if busca.get("frete_gratis"):
         url += "_FreightCost_0"
 
-    print(f" 🌐 Scraping: {url}")
+    print(f" 🌐 Tentando scraping: {url}")
 
     produtos = []
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
-                viewport={"width": 1366, "height": 768}
-            )
-            page = context.new_page()
+        scraper = cloudscraper.create_scraper()
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+            "Accept-Language": "pt-BR,pt;q=0.9",
+        }
+        
+        r = scraper.get(url, headers=headers, timeout=30)
+        print(f"   Status: {r.status_code}")
 
-            page.goto(url, wait_until="networkidle", timeout=90000)
-            page.wait_for_timeout(8000)
+        soup = BeautifulSoup(r.text, "lxml")
 
-            # Rola a página várias vezes para forçar carregamento
-            for _ in range(3):
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                page.wait_for_timeout(2500)
+        cards = soup.select("div.andes-card, li.ui-search-layout__item, article.poly-component")
 
-            soup = BeautifulSoup(page.content(), "lxml")
+        print(f"   🔎 {len(cards)} cards encontrados")
 
-            # Seletores mais completos
-            cards = soup.select("""
-                div.andes-card, 
-                article.andes-card, 
-                li.ui-search-layout__item, 
-                div.poly-card,
-                div.ui-search-result__wrapper,
-                div.ui-search-result
-            """)
+        for card in cards[:limite]:
+            try:
+                titulo = card.select_one("h2, h3, .poly-component__title")
+                titulo = titulo.get_text(strip=True) if titulo else ""
 
-            print(f"   🔎 {len(cards)} cards detectados na página")
-
-            for card in cards[:limite]:
-                try:
-                    # Título - mais opções
-                    titulo_tag = card.select_one("h2.ui-search-item__title, h3.poly-component__title, a.poly-component__title-link, .ui-search-item__title")
-                    titulo = titulo_tag.get_text(strip=True) if titulo_tag else ""
-                    if len(titulo) < 15:
-                        continue
-
-                    # Preços
-                    preco_atual_tag = card.select_one("span.andes-money-amount__fraction, .poly-price__fraction")
-                    preco_original_tag = card.select_one("s .andes-money-amount__fraction, .andes-money-amount--previous .andes-money-amount__fraction")
-
-                    def limpar_preco(tag):
-                        if not tag: return 0
-                        text = tag.get_text(strip=True).replace(".", "").replace(",", ".")
-                        try: return float(text)
-                        except: return 0
-
-                    preco_atual = limpar_preco(preco_atual_tag)
-                    preco_original = limpar_preco(preco_original_tag) or preco_atual
-
-                    if preco_original <= preco_atual * 1.05 or preco_atual < 10:
-                        continue
-
-                    desconto = int(((preco_original - preco_atual) / preco_original) * 100)
-                    if desconto < busca.get("desconto_min", 25):
-                        continue
-
-                    # Link
-                    link_tag = card.select_one("a.ui-search-link, a.poly-component__title-link")
-                    link = "https://www.mercadolivre.com.br" + link_tag.get("href", "") if link_tag else ""
-
-                    # Imagem
-                    img = card.select_one("img")
-                    thumbnail = img.get("src") or img.get("data-src", "") if img else ""
-
-                    produto = {
-                        "id": link.split("/")[-1].split("-")[0] if link else str(hash(titulo)),
-                        "titulo": titulo,
-                        "preco_original": preco_original,
-                        "preco_atual": preco_atual,
-                        "desconto": desconto,
-                        "avaliacao": 4.3,
-                        "qtd_avaliacoes": 60,
-                        "vendidos": 120,
-                        "frete_gratis": True,
-                        "loja_oficial": False,
-                        "thumbnail": thumbnail.replace("http://", "https://"),
-                        "url": link,
-                        "vendedor": "",
-                        "categoria": "Geral",
-                    }
-                    produtos.append(produto)
-                    print(f"     ✅ Encontrado: {titulo[:60]}... ({desconto}% OFF)")
-
-                except:
+                if len(titulo) < 15:
                     continue
 
-            browser.close()
+                preco_atual = card.select_one("span.andes-money-amount__fraction")
+                preco_original = card.select_one("s .andes-money-amount__fraction, .andes-money-amount--previous")
+
+                def limpar(t):
+                    if not t: return 0
+                    return float(t.get_text(strip=True).replace(".", "").replace(",", ".") or 0)
+
+                p_atual = limpar(preco_atual)
+                p_original = limpar(preco_original) or p_atual
+
+                if p_original <= p_atual * 1.08 or p_atual < 10:
+                    continue
+
+                desconto = int(((p_original - p_atual) / p_original) * 100)
+
+                link = card.select_one("a")
+                link = "https://www.mercadolivre.com.br" + link["href"] if link else ""
+
+                produto = {
+                    "id": link.split("/")[-1].split("-")[0] if link else str(hash(titulo)),
+                    "titulo": titulo,
+                    "preco_original": p_original,
+                    "preco_atual": p_atual,
+                    "desconto": desconto,
+                    "avaliacao": 4.3,
+                    "qtd_avaliacoes": 50,
+                    "vendidos": 100,
+                    "frete_gratis": True,
+                    "loja_oficial": False,
+                    "thumbnail": "",
+                    "url": link,
+                    "vendedor": "",
+                    "categoria": "Geral",
+                }
+                produtos.append(produto)
+                print(f"     ✅ {titulo[:60]}... ({desconto}%)")
+
+            except:
+                continue
 
     except Exception as e:
-        print(f" ❌ Erro scraping: {e}")
+        print(f" ❌ Erro: {e}")
 
-    print(f" 📦 {len(produtos)} produtos extraídos com sucesso")
+    print(f" 📦 {len(produtos)} produtos encontrados")
     return produtos
 
 # ====================== FUNÇÕES ORIGINAIS ======================
