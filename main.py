@@ -59,7 +59,7 @@ def calcular_score(produto: dict) -> float:
 
 # ====================== SCRAPING ======================
 def buscar_ml(busca: dict, limite: int = 20) -> list:
-    query = busca["q"].replace(" ", "-").lower()
+    query = busca["q"].replace(" ", "-").lower() if busca.get("q") else ""
     url = f"https://lista.mercadolivre.com.br/{query}"
 
     if busca.get("preco_min") or busca.get("preco_max"):
@@ -77,21 +77,35 @@ def buscar_ml(busca: dict, limite: int = 20) -> list:
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
             )
             page = context.new_page()
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(5000)
+            
+            page.goto(url, wait_until="networkidle", timeout=60000)
+            page.wait_for_timeout(7000)   # Mais tempo para JS carregar
 
             soup = BeautifulSoup(page.content(), "lxml")
-            cards = soup.select("div.andes-card, article.andes-card, div.ui-search-result__wrapper")
+
+            # Seletores mais completos e atualizados
+            cards = soup.select("""
+                div.andes-card, 
+                article.andes-card, 
+                div.ui-search-result__wrapper,
+                li.ui-search-layout__item,
+                div.poly-card__content,
+                div.ui-search-result
+            """)
+
+            print(f"   🔎 {len(cards)} cards encontrados na página")
 
             for card in cards[:limite]:
                 try:
-                    titulo_tag = card.select_one("h2.ui-search-item__title, h3.poly-component__title")
+                    # Título (vários possíveis seletores)
+                    titulo_tag = card.select_one("h2.ui-search-item__title, h3.poly-component__title, a.poly-component__title-link, h2")
                     titulo = titulo_tag.get_text(strip=True) if titulo_tag else ""
-                    if not titulo:
+                    if len(titulo) < 10:
                         continue
 
-                    preco_atual_tag = card.select_one("span.andes-money-amount__fraction")
-                    preco_original_tag = card.select_one("span.andes-money-amount--previous .andes-money-amount__fraction, s .andes-money-amount__fraction")
+                    # Preços
+                    preco_atual_tag = card.select_one("span.andes-money-amount__fraction, span.poly-price__fraction")
+                    preco_original_tag = card.select_one("span.andes-money-amount--previous .andes-money-amount__fraction, s span.andes-money-amount__fraction, span.andes-money-amount__fraction--strike")
 
                     def limpar_preco(tag):
                         if not tag: return 0
@@ -102,26 +116,20 @@ def buscar_ml(busca: dict, limite: int = 20) -> list:
                     preco_atual = limpar_preco(preco_atual_tag)
                     preco_original = limpar_preco(preco_original_tag) or preco_atual
 
-                    if preco_original <= preco_atual * 1.08:
+                    if preco_original <= preco_atual * 1.05:  
                         continue
 
                     desconto = int(((preco_original - preco_atual) / preco_original) * 100)
-                    if desconto < busca.get("desconto_min", 15):
+                    if desconto < busca.get("desconto_min", 20):
                         continue
 
-                    link_tag = card.select_one("a.ui-search-link")
+                    # Link
+                    link_tag = card.select_one("a.ui-search-link, a.poly-component__title-link")
                     link = "https://www.mercadolivre.com.br" + link_tag.get("href", "") if link_tag else ""
 
+                    # Thumbnail
                     img = card.select_one("img")
                     thumbnail = img.get("src") or img.get("data-src", "") if img else ""
-
-                    avaliacao = 4.3
-                    avaliacao_tag = card.select_one("span.andes-rating__average")
-                    if avaliacao_tag:
-                        try:
-                            avaliacao = float(avaliacao_tag.get_text(strip=True).replace(",", "."))
-                        except:
-                            pass
 
                     produto = {
                         "id": link.split("/")[-1].split("-")[0] if link else str(hash(titulo)),
@@ -129,7 +137,7 @@ def buscar_ml(busca: dict, limite: int = 20) -> list:
                         "preco_original": preco_original,
                         "preco_atual": preco_atual,
                         "desconto": desconto,
-                        "avaliacao": avaliacao,
+                        "avaliacao": 4.3,
                         "qtd_avaliacoes": 80,
                         "vendidos": 150,
                         "frete_gratis": busca.get("frete_gratis", False),
@@ -137,13 +145,15 @@ def buscar_ml(busca: dict, limite: int = 20) -> list:
                         "thumbnail": thumbnail.replace("http://", "https://"),
                         "url": link,
                         "vendedor": "",
-                        "categoria": busca["q"],
+                        "categoria": busca.get("q", "Geral"),
                     }
                     produtos.append(produto)
+
                 except:
                     continue
 
             browser.close()
+
     except Exception as e:
         print(f" ❌ Erro scraping: {e}")
 
