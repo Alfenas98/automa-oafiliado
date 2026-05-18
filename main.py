@@ -1,24 +1,25 @@
 """
-🤖 Bot de Afiliados ML — via REST API (sem scraping)
+🤖 Bot de Afiliados ML
+Usa APP_USR access token com refresh automático via refresh_token.
 """
 
-import os
 import json
-import time
 import math
 import random
+import time
 import requests
 from datetime import datetime
 from pathlib import Path
 
 import config as cfg
 
-ARQUIVO_HISTORICO   = "historico.json"
+ARQUIVO_HISTORICO    = "historico.json"
 ARQUIVO_ESTATISTICAS = "estatisticas.json"
+ARQUIVO_TOKEN        = "token_cache.json"
 
 
 # ══════════════════════════════════════════════════════════════
-# 💾 HISTÓRICO
+# 💾 UTILITÁRIOS
 # ══════════════════════════════════════════════════════════════
 
 def carregar_json(arquivo, default):
@@ -45,62 +46,139 @@ def registrar(produto_id, historico):
 
 
 # ══════════════════════════════════════════════════════════════
-# 🧠 SCORE INTELIGENTE
+# 🔑 TOKEN ML — com refresh automático
 # ══════════════════════════════════════════════════════════════
 
-def calcular_score(produto):
-    p = cfg.PESOS_SCORE
-    s_desconto  = min(produto["desconto"] / 50, 1.0) * p["desconto"]
-    av          = produto.get("avaliacao") or 0
-    s_avaliacao = (av / 5.0) * p["avaliacao"]
-    vendidos    = produto.get("vendidos") or 0
-    s_vendidos  = (math.log10(max(vendidos, 1)) / 4) * p["vendidos"]
-    s_frete     = p["frete_gratis"] if produto.get("frete_gratis") else 0
-    s_loja      = p["loja_oficial"]  if produto.get("loja_oficial")  else 0
+def obter_token():
+    """
+    Tenta usar o access_token do config. Se expirado, renova com refresh_token.
+    Salva o novo token em token_cache.json para próximas runs.
+    """
+    cache = carregar_json(ARQUIVO_TOKEN, {})
+
+    # 1. Token em cache ainda válido?
+    if cache.get("access_token") and cache.get("expires_at", 0) > time.time() + 300:
+        print("  🔑 Token em cache (valido)")
+        return cache["access_token"]
+
+    # 2. Tenta o access_token fixo do config (pode já estar válido)
+    token_cfg = cfg.ML_ACCESS_TOKEN
+    if token_cfg:
+        print("  🔑 Usando access_token do config")
+        # Salva com validade de 6h para não testar desnecessariamente
+        salvar_json(ARQUIVO_TOKEN, {
+            "access_token":  token_cfg,
+            "refresh_token": cfg.ML_REFRESH_TOKEN,
+            "expires_at":    time.time() + 21600,
+        })
+        return token_cfg
+
+    return None
+
+
+def renovar_token(refresh_token):
+    """Renova o access_token usando o refresh_token."""
+    print("  🔄 Renovando token via refresh_token...")
+    try:
+        r = requests.post(
+            "https://api.mercadolibre.com/oauth/token",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            data={
+                "grant_type":    "refresh_token",
+                "client_id":     cfg.ML_CLIENT_ID,
+                "client_secret": cfg.ML_CLIENT_SECRET,
+                "refresh_token": refresh_token,
+            },
+            timeout=15,
+        )
+        r.raise_for_status()
+        dados = r.json()
+        novo_token   = dados["access_token"]
+        novo_refresh = dados.get("refresh_token", refresh_token)
+        expires_in   = dados.get("expires_in", 21600)
+
+        salvar_json(ARQUIVO_TOKEN, {
+            "access_token":  novo_token,
+            "refresh_token": novo_refresh,
+            "expires_at":    time.time() + expires_in,
+        })
+
+        print(f"  ✅ Token renovado! Valido por {expires_in // 3600}h")
+        return novo_token
+    except Exception as e:
+        print(f"  ❌ Falha ao renovar token: {e}")
+        return None
+
+
+def buscar_com_token(url, params, token):
+    """Faz requisição autenticada. Se 401, renova token e tenta de novo."""
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "User-Agent":    "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Accept":        "application/json",
+    }
+    r = requests.get(url, params=params, headers=headers, timeout=15)
+
+    if r.status_code == 401:
+        print("  ⚠️  Token expirado, renovando...")
+        cache         = carregar_json(ARQUIVO_TOKEN, {})
+        refresh_token = cache.get("refresh_token") or cfg.ML_REFRESH_TOKEN
+        novo_token    = renovar_token(refresh_token)
+        if novo_token:
+            headers["Authorization"] = f"Bearer {novo_token}"
+            r = requests.get(url, params=params, headers=headers, timeout=15)
+
+    r.raise_for_status()
+    return r
+
+
+# ══════════════════════════════════════════════════════════════
+# 🧠 SCORE
+# ══════════════════════════════════════════════════════════════
+
+def calcular_score(p):
+    pw          = cfg.PESOS_SCORE
+    s_desconto  = min(p["desconto"] / 50, 1.0) * pw["desconto"]
+    av          = p.get("avaliacao") or 0
+    s_avaliacao = (av / 5.0) * pw["avaliacao"]
+    vendidos    = p.get("vendidos") or 0
+    s_vendidos  = (math.log10(max(vendidos, 1)) / 4) * pw["vendidos"]
+    s_frete     = pw["frete_gratis"] if p.get("frete_gratis") else 0
+    s_loja      = pw["loja_oficial"]  if p.get("loja_oficial")  else 0
     return round(s_desconto + s_avaliacao + s_vendidos + s_frete + s_loja, 1)
 
 
 # ══════════════════════════════════════════════════════════════
-# 🔍 MERCADO LIVRE — REST API (confiável, não bloqueia)
+# 🔍 BUSCA ML — API autenticada com todos os filtros
 # ══════════════════════════════════════════════════════════════
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; AfiliadosBot/2.0)",
-    "Accept":     "application/json",
-}
+def buscar_ml(busca, token, limite=50):
+    query = (busca.get("q") or "oferta").strip() or "oferta"
 
-def buscar_ml(busca, limite=50):
-    query = (busca.get("q") or "oferta").strip()
-    if not query:
-        query = "oferta"
-
-    url    = "https://api.mercadolibre.com/sites/MLB/search"
-
-    # ⚠️ Só parâmetros públicos — shipping_cost e condition causam 403
     params = {
-        "q":     query,
-        "sort":  "relevance",
-        "limit": limite,
+        "q":             query,
+        "sort":          "relevance",
+        "limit":         limite,
+        "condition":     "new" if cfg.FILTROS_GLOBAIS.get("apenas_novo") else "all",
+        "shipping_cost": "free" if busca.get("frete_gratis") else None,
     }
+    if busca.get("preco_min"): params["price_min"] = busca["preco_min"]
+    if busca.get("preco_max"): params["price_max"] = busca["preco_max"]
 
-    # Filtro de preço é aceito sem autenticação
-    if busca.get("preco_min"):
-        params["price_min"] = busca["preco_min"]
-    if busca.get("preco_max"):
-        params["price_max"] = busca["preco_max"]
-
-    # frete_gratis e condition=new → filtrados manualmente nos resultados
+    # Remove params None
+    params = {k: v for k, v in params.items() if v is not None}
 
     try:
-        r = requests.get(url, params=params, headers=HEADERS, timeout=15)
-        r.raise_for_status()
+        r          = buscar_com_token("https://api.mercadolibre.com/sites/MLB/search", params, token)
         resultados = r.json().get("results", [])
-        print(f"   🌐 API retornou {len(resultados)} resultados para '{query}'")
+        print(f"   🌐 API: {len(resultados)} resultados para '{query}'")
     except Exception as e:
-        print(f"   ❌ Erro na API ML: {e}")
+        print(f"   ❌ Erro API ML: {e}")
         return []
 
+    desconto_min = busca.get("desconto_min") or 10
     produtos = []
+
     for p in resultados:
         preco_original = p.get("original_price") or 0
         preco_atual    = p.get("price") or 0
@@ -109,50 +187,34 @@ def buscar_ml(busca, limite=50):
             continue
 
         desconto = int(((preco_original - preco_atual) / preco_original) * 100)
-
-        if desconto < busca.get("desconto_min", 10):
+        if desconto < desconto_min:
             continue
 
         frete_info   = p.get("shipping") or {}
         frete_gratis = frete_info.get("free_shipping", False)
         loja_oficial = bool(p.get("official_store_id"))
-        condicao     = p.get("condition", "new")
+        thumb        = (p.get("thumbnail") or "").replace("http://", "https://").replace("-I.jpg", "-O.jpg")
 
-        # Filtro manual: apenas_novo
-        if cfg.FILTROS_GLOBAIS.get("apenas_novo") and condicao != "new":
-            continue
-
-        # Filtro manual: frete grátis (quando exigido pela busca)
-        if busca.get("frete_gratis") and not frete_gratis:
-            continue
-
-        # Pega thumbnail em alta qualidade
-        thumb = (p.get("thumbnail") or "").replace("http://", "https://")
-        thumb = thumb.replace("-I.jpg", "-O.jpg")  # imagem maior
-
-        produto = {
+        produtos.append({
             "id":             str(p["id"]),
             "titulo":         p.get("title", ""),
             "preco_original": preco_original,
             "preco_atual":    preco_atual,
             "desconto":       desconto,
             "avaliacao":      0,
-            "qtd_avaliacoes": 0,
             "vendidos":       p.get("sold_quantity") or 0,
             "frete_gratis":   frete_gratis,
             "loja_oficial":   loja_oficial,
             "thumbnail":      thumb,
             "url":            p.get("permalink", ""),
             "vendedor":       str((p.get("seller") or {}).get("id", "")),
-            "categoria":      query,
-        }
-        produtos.append(produto)
+        })
 
     return produtos
 
 
 def aplicar_filtros(produtos):
-    f = cfg.FILTROS_GLOBAIS
+    f  = cfg.FILTROS_GLOBAIS
     ok = []
     for p in produtos:
         titulo = p["titulo"].lower()
@@ -170,119 +232,76 @@ def aplicar_filtros(produtos):
 
 
 # ══════════════════════════════════════════════════════════════
-# 🔗 LINK DE AFILIADO
+# 🔗 AFILIADO / 💬 MENSAGENS / 📤 TELEGRAM
 # ══════════════════════════════════════════════════════════════
 
-def gerar_link_afiliado(url):
+def gerar_link(url):
     if cfg.AFILIADO_ID:
         return f"https://mercadolivre.com/sec/{cfg.AFILIADO_ID}?url={url}"
     return url
 
-
-# ══════════════════════════════════════════════════════════════
-# 💬 MENSAGENS
-# ══════════════════════════════════════════════════════════════
-
 HEADERS_MSG = [
-    "🔥 *OFERTA IMPERDÍVEL* 🔥",
-    "⚡ *PROMOÇÃO RELÂMPAGO* ⚡",
-    "💥 *DESCONTO ABSURDO* 💥",
-    "🚨 *ALERTA DE OFERTA* 🚨",
-    "🎯 *OPORTUNIDADE ÚNICA* 🎯",
-    "💸 *PREÇO DESPENCOU* 💸",
+    "🔥 *OFERTA IMPERDÍVEL* 🔥", "⚡ *PROMOÇÃO RELÂMPAGO* ⚡",
+    "💥 *DESCONTO ABSURDO* 💥",  "🚨 *ALERTA DE OFERTA* 🚨",
+    "🎯 *OPORTUNIDADE ÚNICA* 🎯","💸 *PREÇO DESPENCOU* 💸",
     "🛒 *MELHOR PREÇO DO DIA* 🛒",
 ]
 
-def fmt_preco(v):
+def fmt(v):
     return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 def formatar_mensagem(p):
-    titulo   = p["titulo"][:55] + ("..." if len(p["titulo"]) > 55 else "")
-    original = fmt_preco(p["preco_original"])
-    atual    = fmt_preco(p["preco_atual"])
-    economia = fmt_preco(p["preco_original"] - p["preco_atual"])
-    link     = p["link_afiliado"]
-    header   = random.choice(HEADERS_MSG)
-
-    linhas = [
-        f"{header}\n",
+    titulo  = p["titulo"][:55] + ("..." if len(p["titulo"]) > 55 else "")
+    economia = fmt(p["preco_original"] - p["preco_atual"])
+    linhas  = [
+        f"{random.choice(HEADERS_MSG)}\n",
         f"📦 *{titulo}*\n",
-        f"~~{original}~~ → *{atual}*",
+        f"~~{fmt(p['preco_original'])}~~ → *{fmt(p['preco_atual'])}*",
         f"💸 *{p['desconto']}% OFF* — economize *{economia}*\n",
     ]
-
     if p.get("vendidos", 0) > 0:
         linhas.append(f"🛒 {p['vendidos']:,} vendidos".replace(",", "."))
-
     extras = []
-    if p.get("frete_gratis"):
-        extras.append("✅ Frete Grátis")
-    if p.get("loja_oficial"):
-        extras.append("🏪 Loja Oficial")
-    if extras:
-        linhas.append("   ".join(extras))
-
-    linhas.append(f"\n👉 [*Garantir oferta agora*]({link})")
+    if p.get("frete_gratis"): extras.append("✅ Frete Grátis")
+    if p.get("loja_oficial"): extras.append("🏪 Loja Oficial")
+    if extras: linhas.append("   ".join(extras))
+    linhas.append(f"\n👉 [*Garantir oferta agora*]({p['link_afiliado']})")
     linhas.append(f"\n_⏰ {datetime.now().strftime('%d/%m às %H:%M')} · Oferta por tempo limitado!_")
-
     return "\n".join(linhas)
 
 def formatar_resumo(stats):
     return (
         f"📊 *Resumo do dia — {datetime.now().strftime('%d/%m/%Y')}*\n\n"
-        f"📦 Postados hoje: *{stats['postados']}*\n"
+        f"📦 Postados: *{stats['postados']}*\n"
         f"🔍 Analisados: *{stats['analisados']}*\n"
         f"🚫 Filtrados: *{stats['filtrados']}*\n"
         f"💸 Maior desconto: *{stats['maior_desconto']}%*\n\n"
-        f"_Mais ofertas amanhã cedo! 🌅_"
+        f"_Mais ofertas amanhã! 🌅_"
     )
-
-
-# ══════════════════════════════════════════════════════════════
-# 📤 TELEGRAM
-# ══════════════════════════════════════════════════════════════
 
 def enviar_telegram(texto, foto=""):
     if not cfg.BOT_TOKEN or not cfg.CHANNEL_ID:
-        print("   ⚠️  Credenciais Telegram não configuradas!")
+        print("   ⚠️  Credenciais Telegram ausentes!")
         return False
-
     base = f"https://api.telegram.org/bot{cfg.BOT_TOKEN}"
-
     if foto:
-        url     = f"{base}/sendPhoto"
-        payload = {
-            "chat_id":    cfg.CHANNEL_ID,
-            "photo":      foto,
-            "caption":    texto,
-            "parse_mode": "Markdown",
-        }
+        r = requests.post(f"{base}/sendPhoto", json={
+            "chat_id": cfg.CHANNEL_ID, "photo": foto,
+            "caption": texto, "parse_mode": "Markdown"
+        }, timeout=15)
     else:
-        url     = f"{base}/sendMessage"
-        payload = {
-            "chat_id":    cfg.CHANNEL_ID,
-            "text":       texto,
-            "parse_mode": "Markdown",
-            "disable_web_page_preview": False,
-        }
-
-    try:
-        r = requests.post(url, json=payload, timeout=15)
-        if r.status_code == 200:
-            return True
-        # Fallback: tenta sem foto
-        if foto:
-            r2 = requests.post(
-                f"{base}/sendMessage",
-                json={"chat_id": cfg.CHANNEL_ID, "text": texto, "parse_mode": "Markdown"},
-                timeout=10
-            )
-            return r2.status_code == 200
-        print(f"   ❌ Telegram erro {r.status_code}: {r.text[:120]}")
-        return False
-    except Exception as e:
-        print(f"   ❌ Erro Telegram: {e}")
-        return False
+        r = requests.post(f"{base}/sendMessage", json={
+            "chat_id": cfg.CHANNEL_ID, "text": texto, "parse_mode": "Markdown"
+        }, timeout=15)
+    if r.status_code == 200:
+        return True
+    if foto:
+        r2 = requests.post(f"{base}/sendMessage", json={
+            "chat_id": cfg.CHANNEL_ID, "text": texto, "parse_mode": "Markdown"
+        }, timeout=10)
+        return r2.status_code == 200
+    print(f"   ❌ Telegram {r.status_code}: {r.text[:100]}")
+    return False
 
 
 # ══════════════════════════════════════════════════════════════
@@ -296,11 +315,9 @@ def buscas_do_horario():
     elif 14 <= hora < 18: periodo = "tarde"
     elif 18 <= hora < 21: periodo = "noite"
     else:                  periodo = "todas"
-
     cats = cfg.HORARIO_CATEGORIAS.get(periodo)
     if cats is None:
         return cfg.BUSCAS
-
     return [b for b in cfg.BUSCAS if (b.get("q") or "") in cats]
 
 
@@ -310,17 +327,21 @@ def buscas_do_horario():
 
 def main():
     agora = datetime.now()
-    print(f"\n{'═'*55}")
-    print(f"  🤖 Bot Afiliados ML · {agora.strftime('%d/%m/%Y %H:%M')}")
-    print(f"{'═'*55}\n")
+    print(f"\n{'='*55}")
+    print(f"  Bot Afiliados ML . {agora.strftime('%d/%m/%Y %H:%M')}")
+    print(f"{'='*55}\n")
 
-    historico    = carregar_json(ARQUIVO_HISTORICO, [])
-    stats        = carregar_json(ARQUIVO_ESTATISTICAS, {
+    token = obter_token()
+    if not token:
+        print("  ❌ Sem token ML — abortando")
+        return
+
+    historico = carregar_json(ARQUIVO_HISTORICO, [])
+    stats     = carregar_json(ARQUIVO_ESTATISTICAS, {
         "postados": 0, "analisados": 0,
         "filtrados": 0, "maior_desconto": 0,
         "data": agora.strftime("%d/%m/%Y")
     })
-
     if stats.get("data") != agora.strftime("%d/%m/%Y"):
         stats = {"postados": 0, "analisados": 0,
                  "filtrados": 0, "maior_desconto": 0,
@@ -329,24 +350,20 @@ def main():
     buscas      = buscas_do_horario()
     total_posts = 0
 
-    print(f"  📋 Categorias nesta rodada: {len(buscas)}")
-    print(f"  📦 Histórico: {len(historico)} produtos já postados\n")
+    print(f"  Categorias: {len(buscas)} | Historico: {len(historico)} produtos\n")
 
     for busca in buscas:
         q = busca.get("q") or "oferta"
-        print(f"  🔍 [{q.upper() or 'GERAL'}]  "
-              f"R${busca.get('preco_min',0)}-R${busca.get('preco_max','∞')}  "
-              f"≥{busca.get('desconto_min',0)}% off  "
-              f"{'🚚 frete grátis' if busca.get('frete_gratis') else ''}")
+        print(f"  [{q.upper()}]  R${busca.get('preco_min',0)}-R${busca.get('preco_max','inf')}  >={busca.get('desconto_min',0)}% off")
 
-        brutos    = buscar_ml(busca, limite=20)
+        brutos      = buscar_ml(busca, token)
         stats["analisados"] += len(brutos)
 
-        filtrados = aplicar_filtros(brutos)
+        filtrados   = aplicar_filtros(brutos)
         descartados = len(brutos) - len(filtrados)
         stats["filtrados"] += descartados
 
-        print(f"     ✅ {len(filtrados)} aprovados | 🚫 {descartados} descartados\n")
+        print(f"     {len(filtrados)} aprovados | {descartados} descartados\n")
 
         postados_agora = 0
         for produto in filtrados:
@@ -355,20 +372,17 @@ def main():
             if ja_postado(produto["id"], historico):
                 continue
 
-            produto["link_afiliado"] = gerar_link_afiliado(produto["url"])
+            produto["link_afiliado"] = gerar_link(produto["url"])
             mensagem = formatar_mensagem(produto)
 
-            print(f"     📤 Score {produto['score']:5.1f} | "
-                  f"{produto['desconto']}% off | "
-                  f"R${produto['preco_atual']:.0f} | "
-                  f"{produto['titulo'][:30]}...")
+            print(f"     Score {produto['score']:5.1f} | {produto['desconto']}% off | "
+                  f"R${produto['preco_atual']:.0f} | {produto['titulo'][:30]}...")
 
             ok = enviar_telegram(mensagem, produto["thumbnail"])
-
             if ok:
                 registrar(produto["id"], historico)
-                postados_agora += 1
-                total_posts    += 1
+                postados_agora    += 1
+                total_posts       += 1
                 stats["postados"] += 1
                 if produto["desconto"] > stats["maior_desconto"]:
                     stats["maior_desconto"] = produto["desconto"]
@@ -376,21 +390,17 @@ def main():
                 time.sleep(cfg.PAUSA_ENTRE_POSTS_SEG)
             else:
                 print(f"     ❌ Falha no envio")
-
         print()
 
-    # Resumo diário às 21h
     if cfg.POSTAR_RESUMO_DIARIO and 21 <= agora.hour < 22:
         enviar_telegram(formatar_resumo(stats))
-        print("  📊 Resumo diário enviado!\n")
 
     salvar_json(ARQUIVO_HISTORICO,    historico)
     salvar_json(ARQUIVO_ESTATISTICAS, stats)
 
-    print(f"{'═'*55}")
-    print(f"  ✅ Finalizado · {total_posts} post(s) enviados")
-    print(f"  📈 Total do dia: {stats['postados']} posts")
-    print(f"{'═'*55}\n")
+    print(f"{'='*55}")
+    print(f"  ✅ Finalizado . {total_posts} post(s) | Total dia: {stats['postados']}")
+    print(f"{'='*55}\n")
 
 
 if __name__ == "__main__":
