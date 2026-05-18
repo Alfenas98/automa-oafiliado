@@ -1,6 +1,7 @@
 """
 Bot de Afiliados ML - versao definitiva
-USA APENAS q + sort + limit na API. Tudo filtrado localmente. Sem 403.
+Usa Bearer token no header para desbloquear IPs do GitHub Actions.
+Filtros aplicados localmente.
 """
 
 import json, math, random, time, requests
@@ -41,17 +42,25 @@ def calcular_score(p):
 
 
 # ══════════════════════════════════════════════════════
-# API ML: SOMENTE q, sort, limit -> nunca retorna 403
-# Todos os outros filtros sao aplicados localmente
+# Bearer token no header desbloqueia IPs de datacenter
+# Params na URL: apenas q, sort, limit (sem 403)
+# Todos os filtros aplicados localmente em Python
 # ══════════════════════════════════════════════════════
 
 def buscar_ml(busca, limite=50):
     query = (busca.get("q") or "oferta").strip() or "oferta"
+
+    headers = {
+        "User-Agent":    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept":        "application/json",
+        "Authorization": f"Bearer {cfg.ML_ACCESS_TOKEN}",
+    }
+
     try:
         r = requests.get(
             "https://api.mercadolibre.com/sites/MLB/search",
             params={"q": query, "sort": "relevance", "limit": limite},
-            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+            headers=headers,
             timeout=15
         )
         r.raise_for_status()
@@ -220,8 +229,8 @@ def main():
 
             if enviar_telegram(formatar_mensagem(produto), produto["thumbnail"]):
                 registrar(produto["id"], historico)
-                postados_agora += 1
-                total          += 1
+                postados_agora    += 1
+                total             += 1
                 stats["postados"] += 1
                 if produto["desconto"] > stats["maior_desconto"]:
                     stats["maior_desconto"] = produto["desconto"]
